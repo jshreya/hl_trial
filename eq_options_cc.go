@@ -46,9 +46,8 @@ func main() {
 func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
 	
 	// initialize entities	
-	
 	client:= Entity{		
-		EntityId: "1",	  
+		EntityId: "entity1",	  
 		EntityName:	"Client A",
 		Portfolio: []Stock{{Symbol:"GOOGL",Quantity:10},{Symbol:"AAPL",Quantity:20}},
 		Options: []Option{{Symbol:"AMZN",Quantity:10,SettlementDate:"07/01/2016"}},
@@ -59,7 +58,7 @@ func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args [
     }
 	
 	bank1:= Entity{
-		EntityId: "2",
+		EntityId: "entity2",
 		EntityName:	"Bank A",
 		Portfolio: []Stock{{Symbol:"MSFT",Quantity:200},{Symbol:"AAPL",Quantity:250},{Symbol:"AMZN",Quantity:400}},
 	}
@@ -69,28 +68,17 @@ func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args [
     }
 	
 	bank2:= Entity{
-		EntityId: "3",
+		EntityId: "entity3",
 		EntityName:	"Bank B",
 		Portfolio: []Stock{{Symbol:"GOOGL",Quantity:150},{Symbol:"AAPL",Quantity:100}},
 	}
 	b, err = json.Marshal(bank2)
 	if err != nil {
         err = stub.PutState(bank2.EntityId,b)
-    }
-	
-	ctidByte, err := stub.GetState("currentTransactionID")
+    }	
+	/*ctidByte, err := stub.GetState("currentTransactionID")
     if err != nil {
         err = stub.PutState("currentTransactionID", []byte("0"))
-    }
-	
-	
-	/*
-	if len(args) != 1 {
-        return nil, errors.New("Incorrect number of arguments. Expecting 1")
-    }
-    err := stub.PutState("hello_world", []byte(args[0]))
-    if err != nil {
-        return nil, err
     }
 	*/
     return nil, err
@@ -101,83 +89,91 @@ func (t *SimpleChaincode) Invoke(stub *shim.ChaincodeStub, function string, args
     // Handle different functions
     if function == "init" {
         return t.Init(stub, "init", args)
-    } else if function == "write" {
-        return t.write(stub, args)
+    } else if function == "requestForQuote" {
+        return t.requestForQuote(stub, args)
     }
+	
     fmt.Println("invoke did not find func: " + function)
-
     return nil, errors.New("Received unknown function invocation")
-}
-
-func (t *SimpleChaincode) write(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-    var name, value string
-    var err error
-    fmt.Println("running write()")
-
-    if len(args) != 2 {
-        return nil, errors.New("Incorrect number of arguments. Expecting 2. name of the variable and value to set")
-    }
-
-    name = args[0]                            				//rename for fun
-    value = args[1]
-    err = stub.PutState(name, []byte(value))  				//write the variable into the chaincode state
-    if err != nil {
-        return nil, err
-    }
-    return nil, nil
 }
 func (t *SimpleChaincode) Query(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
     fmt.Println("query is running " + function)
 
     // Handle different functions
-    if function == "read" {                            		//read a variable
-        return t.read(stub, args)
-    }
-    fmt.Println("query did not find func: " + function)
+    if function == "readEntity" {                       
+        return t.readEntity(stub, args)
+    }	else if function =="readTransaction" {
+		return t.readTransaction(stub,args)
+	}
+	fmt.Println("query did not find func: " + function)
 
     return nil, errors.New("Received unknown function query")
 }
-func (t *SimpleChaincode) read(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+func (t *SimpleChaincode) readEntity(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
     var name, jsonResp string
+    var err error
+	var valAsbytes []byte
+
+    if len(args) != 1 {
+        return nil, errors.New("Incorrect number of arguments. Expecting name of the entity")
+    }
+    name = args[0]
+	if name == "client" {
+		valAsbytes, err = stub.GetState("entity1")
+	} else if name == "bank1" {
+		valAsbytes, err = stub.GetState("entity2")
+	} else if name == "bank2" {
+		valAsbytes, err = stub.GetState("entity3")
+	}
+    if err != nil {
+        jsonResp = "{\"Error\":\"Failed to get state for " + name + "\"}"
+        return nil, errors.New(jsonResp)
+    }
+    return valAsbytes, nil
+}
+
+func (t *SimpleChaincode) readTransaction(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+    var tid, jsonResp string
     var err error
 
     if len(args) != 1 {
-        return nil, errors.New("Incorrect number of arguments. Expecting name of the var to query")
+        return nil, errors.New("Incorrect number of arguments. Expecting transaction ID")
     }
 
-    name = args[0]
-    valAsbytes, err := stub.GetState(name)
+    tid = args[0]
+    valAsbytes, err := stub.GetState(tid)
     if err != nil {
-        jsonResp = "{\"Error\":\"Failed to get state for " + name + "\"}"
+        jsonResp = "{\"Error\":\"Failed to get state for " + tid + "\"}"
         return nil, errors.New(jsonResp)
     }
 
     return valAsbytes, nil
 }
-
-// used by client to request for quotes for a particular stock
-// add rfq transaction to ledger
+// used by client to request for quotes for a particular stock, adds rfq transaction to ledger
 /*			arg 0	: 
 			arg 1	:	OptionType
 			arg 2	:	StockSymbol
 			arg 3	:	Quantity
 			arg 4	:
 */
-func (t *SimpleChaincode) requestForQuote(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *SimpleChaincode) requestForQuote(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
 	if len(args)== 4{
 		ctidByte, err := stub.GetState("currentTransactionID")
 		
+		tid,err := strconv.Atoi(string(ctidByte))
+		q,err := strconv.Atoi(args[3])
+		
 		t := Transaction{
-		TransactionID: strconv.Atoi(string(ctidByte)) + 1,
-		TradeId: strconv.Atoi(string(ctidByte)) + 1,				// create new tradeID
+		TransactionID: tid + 1,
+		TradeId: tid + 1,							// create new tradeID
 		TransactionType: "RFQ",
 		OptionType: args[1],   						// based on input 
-		ClientID:	"",							// get enrollmentID
+		ClientID:	"",								// get enrollmentID
 		BankID: "",
-		StockSymbol: args[2],							// based on input
-		Quantity:	args[3],							// based on input
-		OptionPrice: "",
-		StockRate: "",
+		StockSymbol: args[2],						// based on input
+		Quantity:	q,								// based on input
+		OptionPrice: 0,
+		StockRate: 0,
 		SettlementDate: "",
 		}
 		
@@ -186,26 +182,25 @@ func (t *SimpleChaincode) requestForQuote(stub *shim.ChaincodeStub, function str
 		
 		// write to ledger
 		if err == nil {
-			err = stub.PutState(t.TransactionID,b)
+			err = stub.PutState(strconv.Itoa(t.TransactionID),b)
 			return nil, err
 		}
 	}
 	return nil, errors.New("Incorrect number of arguments")
 }
 
-func (t *SimpleChaincode) respondToQuote(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
-	
-	
-	
+func (t *SimpleChaincode) respondToQuote(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+	return nil,nil	
 }
 
-func (t *SimpleChaincode) tradeExec(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *SimpleChaincode) tradeExec(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+	return nil,nil
 }
 
-func (t *SimpleChaincode) tradeSet(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *SimpleChaincode) tradeSet(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+	return nil,nil
 }
 
-func (t *SimpleChaincode) getEntityState(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (t *SimpleChaincode) getEntityState(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+	return nil,nil
 }
-
-
